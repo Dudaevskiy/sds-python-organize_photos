@@ -12,7 +12,7 @@ from hachoir.metadata import extractMetadata
 # Розширений список підтримуваних форматів
 PHOTO_EXTENSIONS = {
     '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp',
-    '.raw', '.cr2', '.nef', '.arw', '.dng', '.orf', '.rw2', , '.dng', '.pef'
+    '.raw', '.cr2', '.nef', '.arw', '.dng', '.orf', '.rw2', '.dng', '.pef'
 }
 VIDEO_EXTENSIONS = {
     '.mp4', '.mov', '.avi', '.wmv', '.flv', '.webm', '.mkv', 
