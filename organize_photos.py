@@ -8,7 +8,8 @@ from PIL.ExifTags import TAGS
 import time
 from hachoir.parser import createParser
 from hachoir.metadata import extractMetadata
-
+import win32file
+import win32con
 # Розширений список підтримуваних форматів
 PHOTO_EXTENSIONS = {
     '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp',
@@ -124,31 +125,60 @@ def should_process_directory(path, target_dir):
 
 def get_file_date(file_path):
     """
-    Get file date using different methods for files without JSON
+    Get the most appropriate date for the video file using pywin32 for Windows-specific properties.
+    Priority:
+    1. Video metadata (creation date)
+    2. Windows creation date (pywin32)
+    3. File modification time
+    4. File creation time (fallback)
     """
     file_ext = os.path.splitext(file_path)[1].lower()
-    
-    if file_ext in PHOTO_EXTENSIONS:
-        # Для фото використовуємо тільки EXIF
-        exif_date = get_exif_date(file_path)
-        if exif_date:
-            return exif_date, "EXIF"
-    elif file_ext in VIDEO_EXTENSIONS:
-        # Для відео використовуємо метадані відео
+
+    # 1. Пробуємо отримати дату створення з метаданих відео
+    if file_ext in VIDEO_EXTENSIONS:
         video_date = get_video_creation_time(file_path)
         if video_date:
             return video_date, "Video metadata"
-    
-    # Якщо метадані не знайдені, використовуємо системні дати
+
+    # 2. Використовуємо Windows API для отримання дати створення
+    try:
+        handle = win32file.CreateFile(
+            file_path,
+            win32con.GENERIC_READ,
+            win32con.FILE_SHARE_READ,
+            None,
+            win32con.OPEN_EXISTING,
+            win32con.FILE_ATTRIBUTE_NORMAL,
+            None
+        )
+        creation_time = win32file.GetFileTime(handle)[0]  # Створення файлу
+        win32file.CloseHandle(handle)
+
+        # Перетворення часу з формату Windows
+        timestamp = creation_time / 10**7 - 11644473600
+        if timestamp > MIN_VALID_TIMESTAMP:
+            return timestamp, "Windows creation time"
+    except Exception as e:
+        print(f"Error getting Windows creation time for {file_path}: {e}")
+
+    # 3. Використовуємо дату зміни файлу
+    try:
+        modification_time = os.path.getmtime(file_path)
+        if modification_time > MIN_VALID_TIMESTAMP:
+            return modification_time, "File modification time"
+    except Exception as e:
+        print(f"Error getting modification time for {file_path}: {e}")
+
+    # 4. Використовуємо дату створення файлу як fallback
     try:
         creation_time = os.path.getctime(file_path)
         if creation_time > MIN_VALID_TIMESTAMP:
             return creation_time, "File creation time"
-    except:
-        pass
-    
-    modification_time = os.path.getmtime(file_path)
-    return modification_time, "File modification time"
+    except Exception as e:
+        print(f"Error getting file creation time for {file_path}: {e}")
+
+    # Якщо нічого не знайдено, повертаємо поточний час
+    return time.time(), "Fallback current time"
 
 def get_valid_timestamp(metadata, media_path):
     """
