@@ -1,3 +1,51 @@
+import subprocess
+import sys
+
+def install_package(package_name, import_name=None):
+    """
+    Встановлює пакет через pip, якщо він не встановлений
+    """
+    if import_name is None:
+        import_name = package_name
+    try:
+        __import__(import_name)
+        return True
+    except ImportError:
+        print(f"Модуль '{package_name}' не знайдено. Встановлюю...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+            print(f"Модуль '{package_name}' успішно встановлено!")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Помилка встановлення '{package_name}': {e}")
+            return False
+
+def check_and_install_dependencies():
+    """
+    Перевіряє та встановлює всі необхідні залежності
+    """
+    dependencies = [
+        ("Pillow", "PIL"),
+        ("hachoir", "hachoir"),
+        ("pywin32", "win32file"),
+    ]
+
+    all_installed = True
+    for package_name, import_name in dependencies:
+        if not install_package(package_name, import_name):
+            all_installed = False
+
+    if not all_installed:
+        print("\nДеякі залежності не вдалося встановити.")
+        print("Спробуйте встановити їх вручну:")
+        print("  pip install Pillow hachoir pywin32")
+        sys.exit(1)
+
+    print("Всі залежності встановлені. Запускаю скрипт...\n")
+
+# Перевірка та встановлення залежностей
+check_and_install_dependencies()
+
 import json
 import os
 import shutil
