@@ -72,6 +72,48 @@ ALL_MEDIA_EXTENSIONS = PHOTO_EXTENSIONS | VIDEO_EXTENSIONS
 # Мінімальна допустима дата (1 січня 2000 року)
 MIN_VALID_TIMESTAMP = 946684800  # timestamp for 2000-01-01
 
+import re
+
+def get_date_from_filename(file_path):
+    """
+    Extract date from filename patterns like:
+    20210913_185344.jpg        -> 2021-09-13 18:53:44
+    IMG_20211219_203324_685.jpg -> 2021-12-19 20:33:24
+    VID_20220101_120000.mp4    -> 2022-01-01 12:00:00
+    Screenshot_20210913-185344.png -> 2021-09-13 18:53:44
+    PXL_20210913_185344123.jpg -> 2021-09-13 18:53:44
+    """
+    basename = os.path.splitext(os.path.basename(file_path))[0]
+
+    # Pattern: 8 digits (date) + separator + 6 digits (time)
+    match = re.search(r'(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])[_\-]?(\d{2})(\d{2})(\d{2})', basename)
+    if match:
+        try:
+            year, month, day, hour, minute, second = match.groups()
+            dt = datetime(int(year), int(month), int(day), int(hour), int(minute), int(second))
+            timestamp = time.mktime(dt.timetuple())
+            if timestamp > MIN_VALID_TIMESTAMP:
+                print(f"Found filename date: {dt} for {file_path}")
+                return timestamp
+        except ValueError:
+            pass
+
+    # Pattern: only date, no time (20210913.jpg)
+    match = re.search(r'(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])', basename)
+    if match:
+        try:
+            year, month, day = match.groups()
+            dt = datetime(int(year), int(month), int(day))
+            timestamp = time.mktime(dt.timetuple())
+            if timestamp > MIN_VALID_TIMESTAMP:
+                print(f"Found filename date (date only): {dt} for {file_path}")
+                return timestamp
+        except ValueError:
+            pass
+
+    return None
+
+
 def get_exif_date(file_path):
     """
     Extract date from EXIF data for photos
@@ -103,6 +145,7 @@ def get_video_creation_time(file_path):
     """
     Extract creation time from video metadata
     """
+    parser = None
     try:
         parser = createParser(file_path)
         if parser:
@@ -115,7 +158,7 @@ def get_video_creation_time(file_path):
                     'record_date',             # Дата запису (для камер)
                     'date_time_original'       # Оригінальна дата (деякі формати)
                 ]
-                
+
                 for field in date_fields:
                     if hasattr(metadata, field):
                         date = getattr(metadata, field)
@@ -124,7 +167,7 @@ def get_video_creation_time(file_path):
                             if timestamp > MIN_VALID_TIMESTAMP:
                                 print(f"Found video {field} date: {datetime.fromtimestamp(timestamp)} for {file_path}")
                                 return timestamp
-            
+
             # Додатково пробуємо отримати дату з потоків відео
             if hasattr(metadata, 'streams'):
                 for stream in metadata.streams:
@@ -135,9 +178,12 @@ def get_video_creation_time(file_path):
                             if timestamp > MIN_VALID_TIMESTAMP:
                                 print(f"Found video stream creation date: {datetime.fromtimestamp(timestamp)} for {file_path}")
                                 return timestamp
-                                
+
     except Exception as e:
         print(f"Error reading video metadata from {file_path}: {str(e)}")
+    finally:
+        if parser:
+            parser.stream._input.close()
     return None
 
 def get_json_date(metadata):
@@ -160,25 +206,30 @@ def get_json_date(metadata):
     
     return None, None
 
-def should_process_directory(path, target_dir):
+def is_already_in_correct_place(file_path, timestamp, target_dir):
     """
-    Check if directory should be processed
+    Check if file is already in the correct target folder based on its timestamp.
+    Returns True if file is already at target_dir/year/year-month-day/filename
     """
-    # Нормалізуємо шляхи для порівняння
-    norm_path = os.path.normpath(path).lower()
-    norm_target = os.path.normpath(target_dir).lower()
-    
-    # Пропускаємо цільову директорію та її підпапки
-    return not norm_path.startswith(norm_target)
+    date = datetime.fromtimestamp(timestamp)
+    year = str(date.year)
+    month = str(date.month).zfill(2)
+    day = str(date.day).zfill(2)
+
+    expected_dir = os.path.normpath(os.path.join(target_dir, year, f"{year}-{month}-{day}"))
+    actual_dir = os.path.normpath(os.path.dirname(file_path))
+
+    return actual_dir.lower() == expected_dir.lower()
 
 def get_file_date(file_path):
     """
-    Get the most appropriate date for the video file using pywin32 for Windows-specific properties.
+    Get the most appropriate date for the file.
     Priority:
     1. Video metadata (creation date)
-    2. Windows creation date (pywin32)
-    3. File modification time
-    4. File creation time (fallback)
+    2. Filename date pattern
+    3. Windows creation date (pywin32)
+    4. File modification time
+    5. File creation time (fallback)
     """
     file_ext = os.path.splitext(file_path)[1].lower()
 
@@ -188,7 +239,12 @@ def get_file_date(file_path):
         if video_date:
             return video_date, "Video metadata"
 
-    # 2. Використовуємо Windows API для отримання дати створення
+    # 2. Пробуємо дату з назви файлу
+    filename_date = get_date_from_filename(file_path)
+    if filename_date:
+        return filename_date, "Filename"
+
+    # 3. Використовуємо Windows API для отримання дати створення
     try:
         handle = win32file.CreateFile(
             file_path,
@@ -209,7 +265,7 @@ def get_file_date(file_path):
     except Exception as e:
         print(f"Error getting Windows creation time for {file_path}: {e}")
 
-    # 3. Використовуємо дату зміни файлу
+    # 4. Використовуємо дату зміни файлу
     try:
         modification_time = os.path.getmtime(file_path)
         if modification_time > MIN_VALID_TIMESTAMP:
@@ -217,7 +273,7 @@ def get_file_date(file_path):
     except Exception as e:
         print(f"Error getting modification time for {file_path}: {e}")
 
-    # 4. Використовуємо дату створення файлу як fallback
+    # 5. Використовуємо дату створення файлу як fallback
     try:
         creation_time = os.path.getctime(file_path)
         if creation_time > MIN_VALID_TIMESTAMP:
@@ -248,7 +304,12 @@ def get_valid_timestamp(metadata, media_path):
     json_date, json_source = get_json_date(metadata)
     if json_date:
         return json_date, json_source
-    
+
+    # Пробуємо дату з назви файлу
+    filename_date = get_date_from_filename(media_path)
+    if filename_date:
+        return filename_date, "Filename"
+
     # В останню чергу системні дати
     try:
         creation_time = os.path.getctime(media_path)
@@ -256,7 +317,7 @@ def get_valid_timestamp(metadata, media_path):
             return creation_time, "File creation time"
     except:
         pass
-    
+
     modification_time = os.path.getmtime(media_path)
     return modification_time, "File modification time"
 
@@ -341,7 +402,7 @@ def organize_media(source_dir='.', target_dir='___organized_media'):
         'errors': 0,
         'photos': 0,
         'videos': 0,
-        'skipped_directories': 0
+        'skipped_already_correct': 0
     }
     
     print(f"Starting media organization...")
@@ -351,45 +412,42 @@ def organize_media(source_dir='.', target_dir='___organized_media'):
     # First, process files with JSON
     processed_media_files = set()
     for root, _, files in os.walk(source_dir):
-        # Пропускаємо цільову директорію та її підпапки
-        if not should_process_directory(root, target_dir):
-            stats['skipped_directories'] += 1
-            continue
-            
         for file in files:
             if file.endswith('.json'):
                 json_path = os.path.join(root, file)
-                
+
                 try:
                     target_path, media_ext, media_path = process_json_file(json_path)
                     processed_media_files.add(media_path.lower())
-                    
+
+                    full_target = os.path.join(target_dir, target_path)
+                    # Пропускаємо якщо файл вже на правильному місці
+                    if os.path.normpath(media_path).lower() == os.path.normpath(full_target).lower():
+                        stats['skipped_already_correct'] += 1
+                        continue
+
                     full_target_dir = os.path.join(target_dir, os.path.dirname(target_path))
                     os.makedirs(full_target_dir, exist_ok=True)
-                    
-                    shutil.move(media_path, os.path.join(target_dir, target_path))
-                    shutil.move(json_path, os.path.join(target_dir, os.path.dirname(target_path), 
+
+                    shutil.move(media_path, full_target)
+                    shutil.move(json_path, os.path.join(full_target_dir,
                                                       os.path.basename(json_path)))
-                    
+
                     stats['processed'] += 1
                     stats['processed_with_json'] += 1
                     if media_ext in PHOTO_EXTENSIONS:
                         stats['photos'] += 1
                     else:
                         stats['videos'] += 1
-                    
+
                     print(f"Moved (with JSON) {os.path.basename(media_path)} to {target_path}")
-                    
+
                 except Exception as e:
                     stats['errors'] += 1
                     print(f"Error processing {file}: {str(e)}")
     
     # Then, process remaining media files
     for root, _, files in os.walk(source_dir):
-        # Пропускаємо цільову директорію та її підпапки
-        if not should_process_directory(root, target_dir):
-            continue
-            
         for file in files:
             file_path = os.path.join(root, file)
             if file_path.lower() not in processed_media_files:
@@ -397,21 +455,27 @@ def organize_media(source_dir='.', target_dir='___organized_media'):
                 if file_ext in ALL_MEDIA_EXTENSIONS:
                     try:
                         target_path, media_ext = process_media_without_json(file_path)
-                        
+
+                        full_target = os.path.join(target_dir, target_path)
+                        # Пропускаємо якщо файл вже на правильному місці
+                        if os.path.normpath(file_path).lower() == os.path.normpath(full_target).lower():
+                            stats['skipped_already_correct'] += 1
+                            continue
+
                         full_target_dir = os.path.join(target_dir, os.path.dirname(target_path))
                         os.makedirs(full_target_dir, exist_ok=True)
-                        
-                        shutil.move(file_path, os.path.join(target_dir, target_path))
-                        
+
+                        shutil.move(file_path, full_target)
+
                         stats['processed'] += 1
                         stats['processed_without_json'] += 1
                         if media_ext in PHOTO_EXTENSIONS:
                             stats['photos'] += 1
                         else:
                             stats['videos'] += 1
-                        
+
                         print(f"Moved (without JSON) {file} to {target_path}")
-                        
+
                     except Exception as e:
                         stats['errors'] += 1
                         print(f"Error processing {file}: {str(e)}")
@@ -422,7 +486,7 @@ def organize_media(source_dir='.', target_dir='___organized_media'):
     print(f"Processed without JSON: {stats['processed_without_json']}")
     print(f"Photos: {stats['photos']}")
     print(f"Videos: {stats['videos']}")
-    print(f"Skipped directories: {stats['skipped_directories']}")
+    print(f"Skipped (already correct): {stats['skipped_already_correct']}")
     print(f"Errors: {stats['errors']}")
 
 if __name__ == "__main__":

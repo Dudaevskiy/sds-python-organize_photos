@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find 'Z:/___GD_back/Сергей не трогать/mama albums/___organized_media' -type f -name *.jpg)",
+      "Bash(find 'Z:/___GD_back/Сергей не трогать/mama albums' -maxdepth 1 -type f -name *.jpg)",
+      "Bash(for d:*)",
+      "Bash(do echo:*)",
+      "Read(//z/___GD_back/Сергей не трогать/mama albums/sds-python-organize_photos/**)",
+      "Bash(done)",
+      "Bash(python3 -c \"import zipfile; z=zipfile.ZipFile\\(''Z:/___GD_back/Сергей не трогать/mama albums/Gallery.zip''\\); print\\(len\\(z.namelist\\(\\)\\), ''files''\\); [print\\(n\\) for n in z.namelist\\(\\)[:10]]\")",
+      "Bash(python -c \"import zipfile; z=zipfile.ZipFile\\(''Z:/___GD_back/Сергей не трогать/mama albums/Gallery.zip''\\); print\\(len\\(z.namelist\\(\\)\\), ''files''\\); [print\\(n\\) for n in z.namelist\\(\\)[:10]]\")"
+    ]
+  }
+}
